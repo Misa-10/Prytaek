@@ -5,7 +5,11 @@ from pynput.keyboard import Key, Listener
 import pyautogui
 import time
 import pytesseract
-from PIL import Image
+from PIL import Image,ImageOps,ImageGrab
+import cv2
+import numpy as np
+
+
 
 ################################################################
 #                                                              #
@@ -72,15 +76,15 @@ def update_selected_file():
             # Display a message indicating that no file has been selected
              log_status(f"Veuillez sélectionner un fichier dans la liste.")
             
-def process_selected_file(file_listbox,tk,configparser,status_text):
-    
-    
+def process_selected_file():
     if file_listbox.curselection():
         # Get the name of the selected file
         selection = file_listbox.get(file_listbox.curselection())
         # Read the selected file
         config = configparser.ConfigParser()
         config.read('././configurations/deplacement/'+selection)
+        # Get the initial coordinates
+        current_coordinate = extract_coordinates()
         # Move the mouse to each position specified in the file
         for section in config.sections():
             x = int(config[section]['x'])
@@ -92,46 +96,47 @@ def process_selected_file(file_listbox,tk,configparser,status_text):
             # Wait for a short time to allow the click to complete
             time.sleep(0.1)
             log_status(f"Moved mouse to ({x}, {y})")
+            # Continuously check the coordinates until they change
+            while current_coordinate == extract_coordinates():
+                time.sleep(0.001)
+            # Update the current coordinates
+            current_coordinate = extract_coordinates()
         # Display a message indicating that the file has been processed
         log_status(f"Le fichier {selection} a été traité.")
     else:
         # Display a message indicating that no file has been selected
         log_status("Veuillez sélectionner un fichier dans la liste.")
-        
+     
+
+
 def extract_coordinates():
-    # Take a screenshot and save it to a temporary file
-    screenshot = pyautogui.screenshot()
-    screenshot.save('screenshot.png')
+    
 
-    # Open the image file
-    img = Image.open('screenshot.png')
+    # Take a screenshot of the top left of the screen
+    start_time_extract_coordinates = time.time()
+    screenshot = ImageGrab.grab(bbox=(0, 0, 500, 300))
+    rgb_image = screenshot.convert('RGB')
+    rgb_image.save('my_image.jpg', format='JPEG')
 
-    # Convert the image to RGB mode, in case it's in a different format
-    img = img.convert('RGB')
+    # Find white pixels and create a mask
+    white_tolerance = 50  # adjust this as needed
+    mask = Image.new('1', screenshot.size, 0)
+    for x in range(screenshot.width):
+        for y in range(screenshot.height):
+            r, g, b = rgb_image.getpixel((x, y))
+            if abs(r - 255) <= white_tolerance and abs(g - 255) <= white_tolerance and abs(b - 255) <= white_tolerance:
+                mask.putpixel((x, y), 1)
+    # convert the mask image to mode "L"
+    mask = mask.convert("L")
+    # Apply the mask to the original image to keep only white pixels
+    result = ImageOps.colorize(mask, (0, 0, 0), (255, 255, 255))
 
-    # Get the pixel data
-    pixels = img.load()
+    # Save the result as a JPEG file
+    result.save('my_image2.jpg', 'JPEG')
 
-    # Loop through each pixel in the image
-    for y in range(img.height):
-        for x in range(img.width):
-            # Check if the pixel is white
-            if pixels[x, y] == (255, 255, 255):
-                # Keep the pixel white
-                pass
-            else:
-                # Otherwise, make the pixel black
-                pixels[x, y] = (0, 0, 0)
-
-    # Save the modified image
-    img.save('modified_screenshot.png')
-
-    # Load the modified image file
-    image = Image.open('modified_screenshot.png')
-
-    # Use Tesseract to extract text from the image
-    string = pytesseract.image_to_string(image)
-
+    # Use pytesseract to read text from the image
+    string = pytesseract.image_to_string(result)
+    
     # Find the start index of the coordinates string
     start_index = string.find("Coordonnées :") + len("Coordonnées : ")
 
@@ -148,25 +153,25 @@ def extract_coordinates():
     x_coord = int(coordinates_list[0])
     y_coord = int(coordinates_list[1])
 
+    # print the time taken to execute the script
+    end_time_extract_coordinates = time.time()
+    log_status(f"Execution time (extract_coordinates): {end_time_extract_coordinates - start_time_extract_coordinates:.2f} seconds")
+
 
     # Delete the temporary files
-    os.remove('screenshot.png')
-    os.remove('modified_screenshot.png')
-
+    os.remove('my_image.jpg')
+    os.remove('my_image2.jpg')
+    print(x_coord, y_coord)
     # Return the coordinates as a tuple
-    return (x_coord, y_coord)
-
-
-
-
-
+    return [x_coord, y_coord]
 
 
 def on_press(key):
     if key == Key.shift:
         update_selected_file()
     elif key == Key.ctrl_l:
-        process_selected_file(file_listbox,tk,configparser,status_text)
+        process_selected_file()
+    
            
         
 
@@ -217,6 +222,7 @@ def log_status(message):
 # Mouse listener
 listener = Listener(on_press=on_press)
 listener.start()
+
 
 # Run the GUI
 root.mainloop()
